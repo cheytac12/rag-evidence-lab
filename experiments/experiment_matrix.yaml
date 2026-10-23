@@ -1,0 +1,47 @@
+project_title: "An Empirical Evaluation of Retrieval Strategies for Reducing Hallucinations in Retrieval-Augmented Generation Systems"
+chunk_settings:
+  - {size: 128, overlap: 24}
+  - {size: 256, overlap: 48}
+  - {size: 512, overlap: 96}
+allowed_top_k: [3, 5, 10]
+embedding_models:
+  - sentence-transformers/all-MiniLM-L6-v2
+  - BAAI/bge-small-en-v1.5
+reranker_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+rrf_constant: 60
+stages:
+  E1:
+    varies: chunk_size, retriever
+    held_constant: top_k=5; dense_embedding=sentence-transformers/all-MiniLM-L6-v2; reranker=false
+    configurations:
+      - {id: E1-s128-bm25, chunk_size: 128, overlap: 24, retriever: bm25, top_k: 5, reranker: false}
+      - {id: E1-s128-dense, chunk_size: 128, overlap: 24, retriever: dense, top_k: 5, embedding_model: sentence-transformers/all-MiniLM-L6-v2, reranker: false}
+      - {id: E1-s256-bm25, chunk_size: 256, overlap: 48, retriever: bm25, top_k: 5, reranker: false}
+      - {id: E1-s256-dense, chunk_size: 256, overlap: 48, retriever: dense, top_k: 5, embedding_model: sentence-transformers/all-MiniLM-L6-v2, reranker: false}
+      - {id: E1-s512-bm25, chunk_size: 512, overlap: 96, retriever: bm25, top_k: 5, reranker: false}
+      - {id: E1-s512-dense, chunk_size: 512, overlap: 96, retriever: dense, top_k: 5, embedding_model: sentence-transformers/all-MiniLM-L6-v2, reranker: false}
+  E2:
+    varies: embedding_model, retriever
+    held_constant: best E1 chunk setting selected using development MRR; top_k=5; reranker=false
+    configurations:
+      - {id: E2-minilm-dense, embedding_model: sentence-transformers/all-MiniLM-L6-v2, retriever: dense, top_k: 5, reranker: false}
+      - {id: E2-bge-dense, embedding_model: BAAI/bge-small-en-v1.5, retriever: dense, top_k: 5, reranker: false}
+      - {id: E2-minilm-hybrid, embedding_model: sentence-transformers/all-MiniLM-L6-v2, retriever: hybrid, top_k: 5, reranker: false}
+      - {id: E2-bge-hybrid, embedding_model: BAAI/bge-small-en-v1.5, retriever: hybrid, top_k: 5, reranker: false}
+  E3:
+    varies: retriever, top_k
+    held_constant: best E1 chunk setting and best E2 dense model selected on development; reranker=false
+    retrievers: [bm25, dense, hybrid]
+    top_k: [3, 5, 10]
+  E4:
+    varies: reranker
+    held_constant: "two strongest base methods by development MRR (ties: hybrid, dense, bm25); final count=5; candidates=20 when reranking"
+    reranker_values: [false, true]
+  E5:
+    varies: evaluation_split
+    held_constant: "four frozen configurations; same questions, generator, prompt, temperature=0, max_output_tokens=1200, and max_context_tokens=3000"
+    configurations:
+      - {role: baseline, retriever: bm25, reranker: false, top_k: 5}
+      - {role: best_dense_dev, retriever: dense, reranker: false, top_k: 5}
+      - {role: best_hybrid_dev, retriever: hybrid, reranker: false, top_k: 5}
+      - {role: best_reranked_dev, retriever: selected, reranker: true, top_k: 5}

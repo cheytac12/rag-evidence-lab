@@ -1,0 +1,23 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.sqlite3
+
+# Local secrets and Streamlit credentials
+.streamlit/secrets.toml
+
+# User-provided corpus and derived records. Keep the empty folder markers only.
+/data/pdfs/*
+!/data/pdfs/.gitkeep
+/data/processed/*
+!/data/processed/.gitkeep
+/data/benchmark_dev.jsonl
+/data/benchmark_test.jsonl
+
+# Local result database, model cache, and test-freeze artifacts.
+/results/*
+!/results/.gitkeep

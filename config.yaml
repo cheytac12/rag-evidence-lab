@@ -1,0 +1,26 @@
+app_name: RAG Evidence Lab
+description: Domain-agnostic document question answering and controlled retrieval evaluation.
+python_version: "3.11"
+paths:
+  pdfs: data/pdfs
+  pages: data/processed/pages.jsonl
+  chunks: data/processed/chunks.jsonl
+  demo_pages: data/demo/demo_pages.jsonl
+  demo_questions: data/demo/demo_questions.jsonl
+  benchmark_dev: data/benchmark_dev.jsonl
+  benchmark_test: data/benchmark_test.jsonl
+  results_db: results/experiments.sqlite3
+models:
+  tokenizer: sentence-transformers/all-MiniLM-L6-v2
+  embeddings:
+    - sentence-transformers/all-MiniLM-L6-v2
+    - BAAI/bge-small-en-v1.5
+  reranker: cross-encoder/ms-marco-MiniLM-L-6-v2
+generation:
+  provider: OpenAI Responses API
+  environment:
+    api_key: OPENAI_API_KEY
+    model: OPENAI_MODEL
+  temperature: 0
+  max_output_tokens: 1200
+  max_context_tokens: 3000

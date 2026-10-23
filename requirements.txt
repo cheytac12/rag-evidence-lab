@@ -1,0 +1,11 @@
+streamlit>=1.44
+PyMuPDF>=1.25
+transformers>=4.50
+sentence-transformers>=4.0
+rank-bm25>=0.2.2
+numpy>=1.26
+plotly>=6.0
+pandas>=2.2
+openai>=1.70
+PyYAML>=6.0
+pytest>=8.0

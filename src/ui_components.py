@@ -552,6 +552,11 @@ def _is_document_overview_question(question: str) -> bool:
     return bool(refers_to_document and asks_for_overview)
 
 
+def _needs_opening_page_context(question: str, selected_document_count: int) -> bool:
+    """Broad questions about one document should consult its opening pages."""
+    return selected_document_count == 1 and _is_document_overview_question(question)
+
+
 def _corpus_fingerprint(chunks: list[ChunkRecord]) -> str:
     material = "\n".join(
         f"{chunk.doc_id}:{chunk.chunk_id}:{chunk.source_sha256}"
@@ -589,12 +594,18 @@ def _add_opening_page_context(
     chunks: list[ChunkRecord],
     candidates: list[RetrievedPassage],
     top_k: int,
+    method_label: str = "Retrieval",
 ) -> tuple[list[RetrievedPassage], bool]:
     """Add lexical matches from the opening pages for a single-document overview query."""
     if not _is_document_overview_question(question) or len({chunk.doc_id for chunk in chunks}) != 1:
         return candidates, False
     opening_chunks = [chunk for chunk in chunks if chunk.page_start <= 2]
-    opening_k = min(3, max(1, top_k - 1))
+    if not opening_chunks:
+        return candidates, False
+    # Leave room for ordinary retrieval results while adding likely abstract/
+    # introduction passages. A one-passage shortlist can be dominated by front
+    # matter, while three usually reaches the document's main overview text.
+    opening_k = min(3, max(1, top_k - 1), len(opening_chunks))
     opening = retrieve_bm25(question, opening_chunks, top_k=opening_k)
     if not opening:
         return candidates, False
@@ -604,7 +615,7 @@ def _add_opening_page_context(
         replace(
             passage,
             rank=rank,
-            method="dense+opening-page-context" if passage.chunk_id in opening_ids else passage.method,
+            method=f"{method_label.lower()}+opening-page-context" if passage.chunk_id in opening_ids else passage.method,
         )
         for rank, passage in enumerate(combined, start=1)
     ]
@@ -627,10 +638,8 @@ def _ask_page(st, pages, chunks, label):
             doc_id for doc_id, title in doc_map.items()
             if collection == all_option or title == collection
         }
-        overview_context = (
-            method_label == "Dense"
-            and len(selected_collection_doc_ids) == 1
-            and _is_document_overview_question(st.session_state.get("ask_question", ""))
+        overview_context = _needs_opening_page_context(
+            st.session_state.get("ask_question", ""), len(selected_collection_doc_ids)
         )
         request_context = {
             "data_source": label,
@@ -685,13 +694,13 @@ def _ask_page(st, pages, chunks, label):
                         )
                         if overview_context:
                             candidates, overview_context_used = _add_opening_page_context(
-                                question, selected, candidates, top_k
+                                question, selected, candidates, top_k, method_label
                             )
                         passages = rerank_passages(question, candidates, top_k=top_k) if use_reranker else candidates[:top_k]
                     state = {"passages": passages, "answer": None, "error_state": None, "citations": [], "uncertainties": []}
                     state["request_context"] = request_context
                     if overview_context_used:
-                        state["retrieval_label"] = "Dense retrieval + opening-page context"
+                        state["retrieval_label"] = f"{method_label} retrieval + opening-page context"
                     if not passages:
                         state["answer"] = "The indexed documents do not provide enough evidence to answer this question."
                         state["error_state"] = "no_evidence"

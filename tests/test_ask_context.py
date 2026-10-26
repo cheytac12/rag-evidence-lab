@@ -3,6 +3,7 @@ from src.ui_components import (
     _add_opening_page_context,
     _corpus_fingerprint,
     _is_document_overview_question,
+    _retrieve_ask_candidates,
 )
 
 
@@ -55,3 +56,17 @@ def test_corpus_fingerprint_is_order_independent_and_changes_with_index():
 
     assert _corpus_fingerprint([first, second]) == _corpus_fingerprint([second, first])
     assert _corpus_fingerprint([first, second]) != _corpus_fingerprint([replacement, second])
+
+
+def test_hybrid_ask_uses_wide_candidate_pool_before_fusion(monkeypatch):
+    captured = {}
+
+    def fake_hybrid(question, chunks, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr("src.ui_components.retrieve_hybrid", fake_hybrid)
+    _retrieve_ask_candidates("question", [], "Hybrid", top_k=5, use_reranker=False)
+
+    assert captured["top_k"] == 5
+    assert captured["candidate_k"] == 20

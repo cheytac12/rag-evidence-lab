@@ -560,6 +560,30 @@ def _corpus_fingerprint(chunks: list[ChunkRecord]) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
+def _retrieve_ask_candidates(
+    question: str,
+    chunks: list[ChunkRecord],
+    method_label: str,
+    top_k: int,
+    use_reranker: bool,
+) -> list[RetrievedPassage]:
+    candidate_k = 20 if use_reranker else top_k
+    method = method_label.lower()
+    if method == "bm25":
+        return retrieve_bm25(question, chunks, top_k=candidate_k)
+    if method == "dense":
+        return retrieve_dense(question, chunks, top_k=candidate_k, model_id=DEFAULT_EMBEDDING)
+    # Fusion should see a broad enough set from both methods before truncating
+    # to the user's requested result count.
+    return retrieve_hybrid(
+        question,
+        chunks,
+        top_k=candidate_k,
+        model_id=DEFAULT_EMBEDDING,
+        candidate_k=max(candidate_k, 20),
+    )
+
+
 def _add_opening_page_context(
     question: str,
     chunks: list[ChunkRecord],
@@ -656,19 +680,14 @@ def _ask_page(st, pages, chunks, label):
                 overview_context_used = False
                 try:
                     with st.spinner("Retrieving evidence…"):
-                        base = method_label.lower()
-                        candidates_k = 20 if use_reranker else top_k
-                        if base == "bm25":
-                            candidates = retrieve_bm25(question, selected, top_k=candidates_k)
-                        elif base == "dense":
-                            candidates = retrieve_dense(question, selected, top_k=candidates_k, model_id=DEFAULT_EMBEDDING)
-                        else:
-                            candidates = retrieve_hybrid(question, selected, top_k=candidates_k, model_id=DEFAULT_EMBEDDING, candidate_k=candidates_k)
+                        candidates = _retrieve_ask_candidates(
+                            question, selected, method_label, top_k, use_reranker
+                        )
                         if overview_context:
                             candidates, overview_context_used = _add_opening_page_context(
                                 question, selected, candidates, top_k
                             )
-                        passages = rerank_passages(question, candidates, top_k=5) if use_reranker else candidates[:top_k]
+                        passages = rerank_passages(question, candidates, top_k=top_k) if use_reranker else candidates[:top_k]
                     state = {"passages": passages, "answer": None, "error_state": None, "citations": [], "uncertainties": []}
                     state["request_context"] = request_context
                     if overview_context_used:

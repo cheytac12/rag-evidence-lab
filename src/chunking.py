@@ -88,15 +88,23 @@ def chunk_document(pages: list[PageRecord], size: int, overlap: int, tokenizer: 
     token_start = 0
     while token_start < len(offsets):
         token_limit = min(token_start + size, len(offsets))
+        # A sentence boundary near the beginning of the window can otherwise
+        # make token_end <= token_start + overlap. The next window then advances
+        # by one token repeatedly, creating many near-duplicate fragments. Only
+        # honor boundaries that still let the window advance by at least half
+        # the configured chunk size after overlap.
+        minimum_advance = max(1, size // 2)
+        minimum_token_end = min(token_limit, token_start + overlap + minimum_advance)
         char_start = offsets[token_start][0]
         hard_end = offsets[token_limit - 1][1]
-        candidates = [point for point in boundaries if char_start < point <= hard_end]
+        minimum_char_end = offsets[minimum_token_end - 1][1]
+        candidates = [point for point in boundaries if minimum_char_end <= point <= hard_end]
         if candidates:
             char_end = candidates[-1]
             token_end = token_limit
-            while token_end > token_start + 1 and offsets[token_end - 1][1] > char_end:
+            while token_end > minimum_token_end and offsets[token_end - 1][1] > char_end:
                 token_end -= 1
-            if token_end <= token_start:
+            if token_end < minimum_token_end:
                 token_end = token_limit
                 char_end = hard_end
         else:

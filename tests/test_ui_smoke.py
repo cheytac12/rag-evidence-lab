@@ -24,3 +24,18 @@ def test_ask_page_shows_notice_and_missing_openai_state(monkeypatch):
     app.button[0].click().run()
     assert not app.exception
     assert any("Missing OpenAI configuration" in item.value for item in app.info)
+
+
+def test_stale_ask_result_is_removed_when_request_context_changes():
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py", default_timeout=60).run()
+    app.session_state["ask_result"] = {
+        "request_context": {"method": "Dense", "question": "old question"},
+        "answer": "STALE ANSWER",
+        "passages": [],
+    }
+
+    app.radio(key="navigation").set_value("Ask").run()
+
+    assert not app.exception
+    assert app.session_state["ask_result"] is None
+    assert not any("STALE ANSWER" in str(element.value) for element in app.markdown)

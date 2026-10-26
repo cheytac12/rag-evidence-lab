@@ -1,12 +1,14 @@
 """Streamlit design system and seven-page RAG Evidence Lab interface."""
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import csv
+import hashlib
 import html
 import io
 import json
 from pathlib import Path
+import re
 import statistics
 from typing import Any
 
@@ -17,7 +19,7 @@ from .embeddings import DEFAULT_EMBEDDING, retrieve_dense
 from .experiment_runner import (aggregate_question_results, benchmark_counts,
                                 file_sha256, load_benchmark, load_frozen_configuration,
                                 require_formal_benchmark)
-from .generator import (MAX_OUTPUT_TOKENS, TRANSMISSION_NOTICE, configured_model,
+from .generator import (MAX_OUTPUT_TOKENS, PROMPT_VERSION, TRANSMISSION_NOTICE, configured_model,
                         configured_provider, generate_answer, llm_configured,
                         missing_configuration_message)
 from .retrieval_bm25 import retrieve_bm25
@@ -536,6 +538,55 @@ def _render_sources(st, passages: list[RetrievedPassage]):
             st.markdown(f'<div class="source-text">{html.escape(passage.text)}</div>', unsafe_allow_html=True)
 
 
+def _is_document_overview_question(question: str) -> bool:
+    """Recognize broad questions that should consult a document's opening pages."""
+    text = " ".join(question.lower().split())
+    refers_to_document = re.search(
+        r"\b(?:this|the|a|an)\s+(?:(?:research|academic)\s+)?(?:paper|document|article|report|study|pdf)\b",
+        text,
+    )
+    asks_for_overview = re.search(
+        r"\b(?:overview|summari[sz](?:e|es|ed|ing|ation)?|about|purpose|motivation|contribution|problem|goal|aim|main idea)\b",
+        text,
+    )
+    return bool(refers_to_document and asks_for_overview)
+
+
+def _corpus_fingerprint(chunks: list[ChunkRecord]) -> str:
+    material = "\n".join(
+        f"{chunk.doc_id}:{chunk.chunk_id}:{chunk.source_sha256}"
+        for chunk in sorted(chunks, key=lambda item: item.chunk_id)
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _add_opening_page_context(
+    question: str,
+    chunks: list[ChunkRecord],
+    candidates: list[RetrievedPassage],
+    top_k: int,
+) -> tuple[list[RetrievedPassage], bool]:
+    """Add lexical matches from the opening pages for a single-document overview query."""
+    if not _is_document_overview_question(question) or len({chunk.doc_id for chunk in chunks}) != 1:
+        return candidates, False
+    opening_chunks = [chunk for chunk in chunks if chunk.page_start <= 2]
+    opening_k = min(3, max(1, top_k - 1))
+    opening = retrieve_bm25(question, opening_chunks, top_k=opening_k)
+    if not opening:
+        return candidates, False
+    opening_ids = {passage.chunk_id for passage in opening}
+    combined = opening + [passage for passage in candidates if passage.chunk_id not in opening_ids]
+    merged = [
+        replace(
+            passage,
+            rank=rank,
+            method="dense+opening-page-context" if passage.chunk_id in opening_ids else passage.method,
+        )
+        for rank, passage in enumerate(combined, start=1)
+    ]
+    return merged, True
+
+
 def _ask_page(st, pages, chunks, label):
     st.caption(f"Active data source: {label} · {len(pages)} pages · {len(chunks)} chunks")
     left, right = st.columns([7, 5], gap="large")
@@ -548,6 +599,15 @@ def _ask_page(st, pages, chunks, label):
         method_label = st.selectbox("Retrieval method", ["BM25", "Dense", "Hybrid"], key="ask_method")
         top_k = st.selectbox("Top-k passages", [3, 5, 10], index=1, key="ask_top_k")
         use_reranker = st.toggle("Use reranker", value=False, key="ask_reranker")
+        selected_collection_doc_ids = {
+            doc_id for doc_id, title in doc_map.items()
+            if collection == all_option or title == collection
+        }
+        overview_context = (
+            method_label == "Dense"
+            and len(selected_collection_doc_ids) == 1
+            and _is_document_overview_question(st.session_state.get("ask_question", ""))
+        )
         request_context = {
             "data_source": label,
             "document_ids": sorted({page.doc_id for page in pages}),
@@ -556,14 +616,23 @@ def _ask_page(st, pages, chunks, label):
             "method": method_label,
             "top_k": top_k,
             "reranker": use_reranker,
+            "overview_context": overview_context,
+            "corpus_fingerprint": _corpus_fingerprint(chunks),
+            "provider": configured_provider(),
+            "model": configured_model(),
+            "prompt_version": PROMPT_VERSION,
         }
         st.caption(f"Embedding model: {DEFAULT_EMBEDDING} (dense/hybrid)\n\nReranker model: {RERANKER_MODEL}")
+        if overview_context:
+            st.caption("For this overview question, matching passages from the document's opening pages will also be included.")
         st.subheader("Evidence")
         saved = st.session_state.get("ask_result")
         if saved and saved.get("request_context") != request_context:
+            st.session_state["ask_result"] = None
             saved = None
         if saved and saved.get("passages"):
-            st.caption(f"Result uses {label} data · {method_label} retrieval")
+            retrieval_label = saved.get("retrieval_label", f"{method_label} retrieval")
+            st.caption(f"Result uses {label} data · {retrieval_label}")
             _render_sources(st, saved["passages"])
         elif not saved:
             st.info("Retrieved passages and citations will appear here after you submit a question.")
@@ -584,6 +653,7 @@ def _ask_page(st, pages, chunks, label):
                 selected = [chunk for chunk in chunks if selected_doc_ids is None or chunk.doc_id in selected_doc_ids]
                 if not selected:
                     selected = _selected_chunks(label, selected_doc_ids)
+                overview_context_used = False
                 try:
                     with st.spinner("Retrieving evidence…"):
                         base = method_label.lower()
@@ -594,9 +664,15 @@ def _ask_page(st, pages, chunks, label):
                             candidates = retrieve_dense(question, selected, top_k=candidates_k, model_id=DEFAULT_EMBEDDING)
                         else:
                             candidates = retrieve_hybrid(question, selected, top_k=candidates_k, model_id=DEFAULT_EMBEDDING, candidate_k=candidates_k)
+                        if overview_context:
+                            candidates, overview_context_used = _add_opening_page_context(
+                                question, selected, candidates, top_k
+                            )
                         passages = rerank_passages(question, candidates, top_k=5) if use_reranker else candidates[:top_k]
                     state = {"passages": passages, "answer": None, "error_state": None, "citations": [], "uncertainties": []}
                     state["request_context"] = request_context
+                    if overview_context_used:
+                        state["retrieval_label"] = "Dense retrieval + opening-page context"
                     if not passages:
                         state["answer"] = "The indexed documents do not provide enough evidence to answer this question."
                         state["error_state"] = "no_evidence"
@@ -618,6 +694,7 @@ def _ask_page(st, pages, chunks, label):
                     st.rerun()
         saved = st.session_state.get("ask_result")
         if saved and saved.get("request_context") != request_context:
+            st.session_state["ask_result"] = None
             saved = None
         if saved:
             if saved.get("error_state") == "retrieval_failure":

@@ -537,7 +537,7 @@ def _render_sources(st, passages: list[RetrievedPassage]):
 
 
 def _ask_page(st, pages, chunks, label):
-    st.caption(f"Active data source: {label}")
+    st.caption(f"Active data source: {label} · {len(pages)} pages · {len(chunks)} chunks")
     left, right = st.columns([7, 5], gap="large")
     with right:
         st.subheader("Retrieval settings")
@@ -548,10 +548,22 @@ def _ask_page(st, pages, chunks, label):
         method_label = st.selectbox("Retrieval method", ["BM25", "Dense", "Hybrid"], key="ask_method")
         top_k = st.selectbox("Top-k passages", [3, 5, 10], index=1, key="ask_top_k")
         use_reranker = st.toggle("Use reranker", value=False, key="ask_reranker")
+        request_context = {
+            "data_source": label,
+            "document_ids": sorted({page.doc_id for page in pages}),
+            "question": st.session_state.get("ask_question", "").strip(),
+            "collection": collection,
+            "method": method_label,
+            "top_k": top_k,
+            "reranker": use_reranker,
+        }
         st.caption(f"Embedding model: {DEFAULT_EMBEDDING} (dense/hybrid)\n\nReranker model: {RERANKER_MODEL}")
         st.subheader("Evidence")
         saved = st.session_state.get("ask_result")
+        if saved and saved.get("request_context") != request_context:
+            saved = None
         if saved and saved.get("passages"):
+            st.caption(f"Result uses {label} data · {method_label} retrieval")
             _render_sources(st, saved["passages"])
         elif not saved:
             st.info("Retrieved passages and citations will appear here after you submit a question.")
@@ -563,6 +575,8 @@ def _ask_page(st, pages, chunks, label):
             st.caption("Add PDFs on the Corpus page or switch to the isolated DEMO collection before retrieving.")
         elif not question:
             st.caption("Enter a question to enable evidence retrieval.")
+        elif pages and not chunks:
+            st.warning("This collection has extracted pages but no indexed chunks. Open Corpus and process the PDFs again before asking.")
         if st.button("Retrieve evidence and answer", type="primary", use_container_width=True, disabled=not question or not pages):
                 selected_doc_ids = None
                 if collection != all_option:
@@ -582,6 +596,7 @@ def _ask_page(st, pages, chunks, label):
                             candidates = retrieve_hybrid(question, selected, top_k=candidates_k, model_id=DEFAULT_EMBEDDING, candidate_k=candidates_k)
                         passages = rerank_passages(question, candidates, top_k=5) if use_reranker else candidates[:top_k]
                     state = {"passages": passages, "answer": None, "error_state": None, "citations": [], "uncertainties": []}
+                    state["request_context"] = request_context
                     if not passages:
                         state["answer"] = "The indexed documents do not provide enough evidence to answer this question."
                         state["error_state"] = "no_evidence"
@@ -599,9 +614,11 @@ def _ask_page(st, pages, chunks, label):
                     st.session_state["ask_result"] = state
                     st.rerun()
                 except Exception as exc:
-                    st.session_state["ask_result"] = {"passages": [], "answer": None, "error_state": "retrieval_failure", "error_message": _safe_error(f"Retrieval failed: {exc}")}
+                    st.session_state["ask_result"] = {"passages": [], "answer": None, "error_state": "retrieval_failure", "error_message": _safe_error(f"Retrieval failed: {exc}"), "request_context": request_context}
                     st.rerun()
         saved = st.session_state.get("ask_result")
+        if saved and saved.get("request_context") != request_context:
+            saved = None
         if saved:
             if saved.get("error_state") == "retrieval_failure":
                 st.error(saved.get("error_message", "Retrieval failed."))

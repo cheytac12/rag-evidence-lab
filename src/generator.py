@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import time
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -156,14 +157,26 @@ def _call_gemini(api_key: str, model_name: str, system_prompt: str, user_payload
     }
     request = Request(endpoint, data=json.dumps(request_body).encode("utf-8"),
                       headers={"Content-Type": "application/json", "x-goog-api-key": api_key}, method="POST")
-    try:
-        with urlopen(request, timeout=90) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        details = exc.read().decode("utf-8", errors="replace")[:500].replace(api_key, "[REDACTED]")
-        raise RuntimeError(f"Gemini API returned HTTP {exc.code}: {details}") from exc
-    except URLError as exc:
-        raise RuntimeError(f"Could not reach the Gemini API: {exc.reason}") from exc
+    for attempt in range(3):
+        try:
+            with urlopen(request, timeout=90) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            break
+        except HTTPError as exc:
+            details = exc.read().decode("utf-8", errors="replace")[:500].replace(api_key, "[REDACTED]")
+            if exc.code == 503 and attempt < 2:
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                try:
+                    delay = min(max(float(retry_after), 1.0), 8.0) if retry_after else 2 ** attempt
+                except ValueError:
+                    delay = 2 ** attempt
+                time.sleep(delay)
+                continue
+            if exc.code == 503:
+                raise RuntimeError(f"Gemini is temporarily overloaded (HTTP 503) after 3 attempts. Please retry shortly. Details: {details}") from exc
+            raise RuntimeError(f"Gemini API returned HTTP {exc.code}: {details}") from exc
+        except URLError as exc:
+            raise RuntimeError(f"Could not reach the Gemini API: {exc.reason}") from exc
     candidates = result.get("candidates", [])
     parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
     output_text = "".join(part.get("text", "") for part in parts if isinstance(part, dict))

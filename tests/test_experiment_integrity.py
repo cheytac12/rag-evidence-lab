@@ -4,6 +4,7 @@ import pytest
 import yaml
 
 from src.experiment_runner import aggregate_question_results, benchmark_counts, file_sha256, load_frozen_configuration
+from src.generator import PROMPT_VERSION
 from src.schemas import BenchmarkQuestion, PageRecord
 from src.storage import ExperimentStore
 
@@ -16,7 +17,7 @@ def _frozen(path, matrix_path):
         {"id": "reranked", "stage": "E5", "chunk_size": 128, "overlap": 24, "retriever": "hybrid", "top_k": 5, "reranker": True, "embedding_model": "sentence-transformers/all-MiniLM-L6-v2"},
     ]
     body = yaml.safe_dump({"matrix_sha256": file_sha256(matrix_path),
-                           "generation": {"model": None, "prompt_version": "rag-evidence-v1",
+                           "generation": {"model": None, "prompt_version": PROMPT_VERSION,
                                           "evaluator_prompt_version": "claim-review-v1", "temperature": 0,
                                           "max_output_tokens": 1200, "max_context_tokens": 3000},
                            "configurations": configs})

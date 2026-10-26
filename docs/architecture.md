@@ -20,7 +20,7 @@ flowchart LR
     Dense --> Evidence
     Fusion --> Evidence
     Rerank --> Evidence
-    Evidence --> Generator[Optional OpenAI Responses API]
+    Evidence --> Generator[Optional Gemini or OpenAI API]
     Generator --> Answer[Answer + atomic claims + citations]
     Evidence --> RetrievalMetrics[Evidence-span retrieval metrics]
     Answer --> ClaimReview[Automated claim/correctness review]
@@ -62,15 +62,15 @@ The optional CrossEncoder reranker scores query/passage pairs for up to 20 candi
 
 ### 4. Answer generation and evaluation
 
-`src/generator.py` uses the official OpenAI Python SDK Responses API when both `OPENAI_API_KEY` and `OPENAI_MODEL` are present. It requests a strict JSON answer containing the answer text, atomic claims, citations to supplied passage IDs, and uncertainties. The application validates the output schema and rejects citations that do not refer to retrieved passages.
+`src/generator.py` supports Google Gemini through the Gemini generateContent API and OpenAI through the Responses API. Select the provider with `LLM_PROVIDER`; Gemini reads `GEMINI_API_KEY` and `GEMINI_MODEL`, while OpenAI reads `OPENAI_API_KEY` and `OPENAI_MODEL`. Gemini structured output and OpenAI strict JSON output both request the same answer schema containing answer text, atomic claims, citations to supplied passage IDs, and uncertainties. The application validates the output and rejects citations that do not refer to retrieved passages.
 
-The configured model is also used for automated claim support labels and reference-answer correctness scoring. These are model judgments, not ground truth or human review. The app stores model and prompt-version metadata when available.
+The configured model is also used for automated claim support labels and reference-answer correctness scoring. These are model judgments, not ground truth or human review. The app stores provider, model, and prompt-version metadata when available.
 
 Without API credentials:
 
 - PDF ingestion, local chunking, BM25/dense/hybrid retrieval, source evidence display, and deterministic retrieval metrics can still run.
 - Generated answer text and LLM-based claim/correctness metrics are unavailable.
-- The app does not silently substitute a different provider or pretend an unavailable metric was computed.
+- The app does not pretend an unavailable metric was computed. The provider/model selected for a held-out run must match the frozen test configuration.
 
 API requests may incur costs. The app makes no generation or evaluation request during ingestion. When generation runs, the request contains the question and selected passages, not the PDF file or full corpus. Claim review and correctness evaluation send their respective question/answer/reference fields as documented in the root README.
 

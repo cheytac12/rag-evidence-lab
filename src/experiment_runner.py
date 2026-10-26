@@ -18,7 +18,8 @@ from .chunking import CHUNK_OVERLAPS, chunk_pages
 from .document_loader import sha256_file
 from .embeddings import DEFAULT_EMBEDDING
 from .generator import (EVALUATOR_PROMPT_VERSION, MAX_CONTEXT_TOKENS, MAX_OUTPUT_TOKENS, PROMPT_VERSION,
-                        evaluate_claims, evaluate_correctness, generate_answer, openai_configured)
+                        configured_model, configured_provider, evaluate_claims, evaluate_correctness,
+                        generate_answer, llm_configured, missing_configuration_message)
 from .retrieval_bm25 import retrieve_bm25
 from .retrieval_hybrid import retrieve_hybrid
 from .retrieval_metrics import retrieval_metrics, unanswerable_metrics
@@ -251,7 +252,8 @@ def freeze_test_configuration(matrix_path: str | Path, output_path: str | Path =
     selected = _resolve_e5(matrix, store)
     frozen = {"matrix_sha256": file_sha256(matrix_path), "created_at": datetime.now(timezone.utc).isoformat(),
               "selection_split": "dev", "selection_rule": "Macro MRR; ties for E4 retriever ordering use hybrid, dense, BM25.",
-              "generation": {"model": os.environ.get("OPENAI_MODEL") or None,
+              "generation": {"provider": configured_provider() if llm_configured() else None,
+                             "model": configured_model() if llm_configured() else None,
                              "prompt_version": PROMPT_VERSION,
                              "evaluator_prompt_version": EVALUATOR_PROMPT_VERSION,
                              "temperature": 0, "max_output_tokens": MAX_OUTPUT_TOKENS,
@@ -393,20 +395,22 @@ def _run_one_configuration(config: dict[str, Any], questions: list[BenchmarkQues
                          benchmark_sha256=benchmark_hash, configuration_id=cid, settings=stored_settings,
                          embedding_model=config.get("embedding_model"),
                          reranker_model=RERANKER_MODEL if config.get("reranker") else None,
-                         generator_model=os.environ.get("OPENAI_MODEL") if require_generation and openai_configured() else None,
+                         generator_model=configured_model() if require_generation and llm_configured() else None,
                          prompt_version=PROMPT_VERSION if require_generation else None, status=status)
     else:
         store.set_running(run_id)
     frozen_model = config.get("frozen_generator_model")
-    current_model = os.environ.get("OPENAI_MODEL")
-    if require_generation and current_model and current_model != frozen_model:
-        reason = "Configured OPENAI_MODEL differs from the model recorded in the frozen test configuration. Freeze again using development-only selection."
+    frozen_provider = config.get("frozen_generator_provider", "openai")
+    current_model = configured_model() if llm_configured() else None
+    current_provider = configured_provider() if llm_configured() else None
+    if require_generation and current_model and (current_model != frozen_model or current_provider != frozen_provider):
+        reason = "Configured LLM provider or model differs from the frozen test configuration. Freeze again using development-only selection."
         store.finish_run(run_id, "blocked", reason)
         return {"run_id": run_id, "configuration_id": cid, "status": "blocked", "reason": reason}
-    generation_available = openai_configured() if require_generation else False
+    generation_available = llm_configured() if require_generation else False
     defer_e4_generation_block = require_generation and split == "dev" and config.get("stage") == "E4" and not generation_available
     if require_generation and not generation_available and not defer_e4_generation_block:
-        reason = "OpenAI generation/evaluation is blocked: OPENAI_API_KEY and OPENAI_MODEL are required."
+        reason = missing_configuration_message()
         store.finish_run(run_id, "blocked", reason)
         return {"run_id": run_id, "configuration_id": cid, "status": "blocked", "reason": reason}
     chunks = chunks_by_size.get(config["chunk_size"], [])
@@ -465,7 +469,7 @@ def _run_one_configuration(config: dict[str, Any], questions: list[BenchmarkQues
                 raise ValueError(f"Selected context exceeds the frozen {MAX_CONTEXT_TOKENS}-token maximum")
             if require_generation:
                 if not generation_available:
-                    payload["generation_blocked_reason"] = "OpenAI generation/evaluation is blocked: OPENAI_API_KEY and OPENAI_MODEL are required."
+                    payload["generation_blocked_reason"] = missing_configuration_message()
                     payload["latency"]["total_seconds"] = time.perf_counter() - t0
                     store.add_question_result(run_id, question.question_id, payload)
                     continue
@@ -495,6 +499,7 @@ def _run_one_configuration(config: dict[str, Any], questions: list[BenchmarkQues
                                 "correctness_automated": correctness,
                                 "generator_model": generated["model"], "prompt_version": generated["prompt_version"],
                                 "evaluator_prompt_version": EVALUATOR_PROMPT_VERSION,
+                                "generation_provider": generated["provider"],
                                 "temperature": 0, "max_output_tokens": MAX_OUTPUT_TOKENS,
                                 "output_token_count": generated["output_tokens"],
                                 "provider_cost": generated["provider_cost"]})
@@ -505,14 +510,16 @@ def _run_one_configuration(config: dict[str, Any], questions: list[BenchmarkQues
             payload["latency"]["total_seconds"] = time.perf_counter() - t0
             store.add_question_result(run_id, question.question_id, payload)
         if defer_e4_generation_block:
-            reason = "OpenAI generation/evaluation is blocked: OPENAI_API_KEY and OPENAI_MODEL are required. Retrieval metrics were recorded; answer metrics are unavailable."
+            reason = missing_configuration_message() + " Retrieval metrics were recorded; answer metrics are unavailable."
             store.finish_run(run_id, "blocked", reason)
             return {"run_id": run_id, "configuration_id": cid, "status": "blocked", "reason": reason}
         store.finish_run(run_id, "complete")
         return {"run_id": run_id, "configuration_id": cid, "status": "complete", "question_count": len(questions)}
     except Exception as exc:
         # Error strings are sanitized so credentials can never be persisted accidentally.
-        error = f"{type(exc).__name__}: {exc}".replace(os.environ.get("OPENAI_API_KEY", "\0"), "[REDACTED]")
+        error = f"{type(exc).__name__}: {exc}"
+        for secret_name in ("OPENAI_API_KEY", "GEMINI_API_KEY"):
+            error = error.replace(os.environ.get(secret_name, "\0"), "[REDACTED]")
         status = "blocked" if "required" in error.lower() or "could not load" in error.lower() or "blocked" in error.lower() else "failed"
         store.finish_run(run_id, status, error[:1000])
         return {"run_id": run_id, "configuration_id": cid, "status": status, "reason": error[:1000]}
@@ -550,13 +557,14 @@ def run_experiments(matrix_path: str | Path, split: str, *, pages_path: str | Pa
     store = ExperimentStore(db_path)
     if split == "test":
         snapshot, frozen_hash = load_frozen_configuration(frozen_path, matrix_path)
-        if not openai_configured():
+        if not llm_configured():
             # Create one blocked run per frozen configuration with the concrete dependency reason.
             configs = snapshot["configurations"]
         else:
             configs = snapshot["configurations"]
         configs = [{**config, "frozen_snapshot_sha256": frozen_hash,
-                    "frozen_generator_model": snapshot["generation"].get("model")} for config in configs]
+                    "frozen_generator_model": snapshot["generation"].get("model"),
+                    "frozen_generator_provider": snapshot["generation"].get("provider", "openai")} for config in configs]
         generation = True
     elif split == "dev":
         # E1 -> E2 -> E3 -> E4 selection is sequential and based only on this dev split.

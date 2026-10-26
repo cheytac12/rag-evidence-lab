@@ -15,19 +15,19 @@ RAG Evidence Lab works with any user-selected PDF subject. The project repositor
 | `results/experiments.sqlite3` | Runs, per-question outputs, evaluation fields, human review timestamps | Ignored |
 | `results/embedding_cache/` | Local dense-vector cache | Ignored |
 | `results/frozen_test_config.yaml` and checksum | Frozen test-stage configuration snapshot | Ignored |
-| `.env` | Optional local OpenAI key and model setting | Ignored |
+| `.env` | Optional local Gemini or OpenAI provider, key, and model setting | Ignored |
 
 The root `.gitignore` keeps local content out of Git by default. This includes the documents themselves and derived page/chunk text, which can reproduce source content. Do not force-add these files to a GitHub repository unless you have deliberately reviewed and intend to publish them.
 
 ## What gets sent to the configured API
 
-The code does not send PDFs or the full corpus during ingestion and retrieval. If a user configures the OpenAI Responses API:
+The code does not send PDFs or the full corpus during ingestion and retrieval. If a user configures a model API:
 
 - Answer generation sends the question and selected retrieved passages.
 - Claim evaluation sends the question, generated answer, extracted claims, and selected passages.
 - Correctness evaluation sends the question, answer, reference answer, and required facts.
 
-These calls can consume paid API usage. The API is separate from ChatGPT billing. Keep credentials out of the repository and do not configure the API unless you accept the account's terms and possible charges. Local ingestion and retrieval work without an API key.
+OpenAI API usage can consume paid usage and is separate from ChatGPT billing. Gemini AI Studio free-tier usage is quota-limited, and Google's free-tier terms say submitted content may be used to improve Google products; check current terms before sending sensitive passages. Keep credentials out of the repository. Local ingestion and retrieval work without an API key.
 
 ## Benchmark records and review
 

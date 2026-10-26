@@ -78,7 +78,7 @@ python -m streamlit run app.py
 
 Open **Experiments** to filter runs by split, data label, method, chunk size, `top_k`, and reranking; inspect summary tables and metric charts; and compare up to four configurations side by side. Open **Retrieval debugger** to inspect per-question gold spans and missed evidence. Open **Claims** to examine claim-level model labels and record human review. **Exports** downloads per-question and aggregate CSV, full result JSON, frozen YAML, and a benchmark validation report.
 
-If OpenAI credentials are absent, retrieval and its evidence-span metrics remain available. Answer generation and model-judged metrics will be unavailable or blocked; do not replace them with fabricated or estimated values. An API model may incur cost when configured.
+If model API credentials are absent, retrieval and its evidence-span metrics remain available. Answer generation and model-judged metrics will be unavailable or blocked; do not replace them with fabricated or estimated values. Record the provider and model ID. Gemini free-tier quotas and data-use terms apply; other provider API usage may incur cost.
 
 ## Interpreting results
 

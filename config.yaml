@@ -17,10 +17,13 @@ models:
     - BAAI/bge-small-en-v1.5
   reranker: cross-encoder/ms-marco-MiniLM-L-6-v2
 generation:
-  provider: OpenAI Responses API
+  provider: Selectable Google Gemini or OpenAI API
   environment:
-    api_key: OPENAI_API_KEY
-    model: OPENAI_MODEL
+    provider: LLM_PROVIDER
+    gemini_api_key: GEMINI_API_KEY
+    gemini_model: GEMINI_MODEL
+    openai_api_key: OPENAI_API_KEY
+    openai_model: OPENAI_MODEL
   temperature: 0
   max_output_tokens: 1200
   max_context_tokens: 3000

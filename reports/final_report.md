@@ -34,7 +34,7 @@ The project accepts user-selected PDFs without imposing a subject domain. The re
 
 # System Architecture
 
-PyMuPDF extracts normalized page text locally. A Hugging Face tokenizer produces token counts and source-offset chunks. BM25 uses `rank-bm25`; dense retrieval encodes chunks with Sentence Transformers and computes cosine similarity in NumPy; hybrid retrieval uses Reciprocal Rank Fusion with constant 60. An optional Sentence Transformers CrossEncoder reranks up to 20 candidates. Streamlit calls reusable modules in `src/`. SQLite stores run metadata and per-question results. OpenAI's official Python SDK Responses API is the only hosted generator and LLM evaluator.
+PyMuPDF extracts normalized page text locally. A Hugging Face tokenizer produces token counts and source-offset chunks. BM25 uses `rank-bm25`; dense retrieval encodes chunks with Sentence Transformers and computes cosine similarity in NumPy; hybrid retrieval uses Reciprocal Rank Fusion with constant 60. An optional Sentence Transformers CrossEncoder reranks up to 20 candidates. Streamlit calls reusable modules in `src/`. SQLite stores run metadata and per-question results. The optional hosted answer generator and LLM evaluator support Google Gemini and OpenAI; no real-corpus result is claimed by this repository snapshot.
 
 # Experimental Methodology
 

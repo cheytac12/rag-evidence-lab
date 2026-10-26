@@ -54,7 +54,7 @@ python -m streamlit run app.py
 
 If `py` is unavailable, create the virtual environment with the path to an installed Python 3.11 interpreter. Open the local URL printed by Streamlit.
 
-The first use of the tokenizer or a Sentence Transformers model may download model files from Hugging Face. This is a local model download; it is separate from OpenAI API usage.
+The first use of the tokenizer or a Sentence Transformers model may download model files from Hugging Face. This is a local model download; it is separate from hosted model API usage.
 
 ## Use your own PDFs
 
@@ -67,11 +67,21 @@ PDF extraction and retrieval run locally. The app keeps page provenance and sour
 
 ### API and cost behavior
 
-An API key is optional. Ingestion, indexing, retrieval, evidence display, and deterministic retrieval metrics do not require OpenAI credentials. Answer generation and LLM-based claim/correctness evaluation use the OpenAI Responses API when `OPENAI_API_KEY` and `OPENAI_MODEL` are set. API use may cost money and is billed separately from ChatGPT. **Do not configure a key unless you have decided to use an API and confirmed the account's billing/credit terms.**
+An API key is optional. Ingestion, indexing, retrieval, evidence display, and deterministic retrieval metrics run without a hosted model API. For a Google AI Studio key, create a key in AI Studio and add these entries to your local `.env` file:
+
+```dotenv
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-3.8-flash
+```
+
+The key creation page does not ask you to choose a model; the app selects the model by sending its model ID with each request. The values above do not need quotation marks. Google’s free tier has model access and rate limits, and its free tier terms say submitted content may be used to improve Google products. Check the current [Gemini API pricing and tier details](https://ai.google.dev/gemini-api/docs/pricing) before sending anything you consider sensitive.
+
+OpenAI remains available as an alternative: set `LLM_PROVIDER=openai`, `OPENAI_API_KEY`, and `OPENAI_MODEL`. OpenAI API usage may cost money and is billed separately from ChatGPT. The app sends the question and selected retrieved passages for answer generation, the question/answer/claims/passages for claim review, and reference-answer material for correctness evaluation. The PDF files and full corpus are not sent by these code paths. With no configured credentials, hosted generation and LLM-based evaluation are disabled.
 
 When generation runs, the question and selected retrieved passages are sent to the configured model. Claim review sends the question, answer, claims, and selected passages; correctness evaluation sends the question, answer, reference answer, and required facts. The PDF files and full corpus are not sent by these code paths. With no credentials, generation and LLM-based evaluation are disabled; no paid API is called.
 
-Copy [`.env.example`](.env.example) to `.env` only if enabling an API. Keep the key private. `.env` is ignored by Git.
+Copy [`.env.example`](.env.example) to `.env` only if enabling an API. Keep the key private; never paste it into chat or commit it. `.env` is ignored by Git.
 
 ## Formal evaluation workflow
 

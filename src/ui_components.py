@@ -17,8 +17,9 @@ from .embeddings import DEFAULT_EMBEDDING, retrieve_dense
 from .experiment_runner import (aggregate_question_results, benchmark_counts,
                                 file_sha256, load_benchmark, load_frozen_configuration,
                                 require_formal_benchmark)
-from .generator import (MAX_OUTPUT_TOKENS, TRANSMISSION_NOTICE, generate_answer,
-                        missing_configuration_message, openai_configured)
+from .generator import (MAX_OUTPUT_TOKENS, TRANSMISSION_NOTICE, configured_model,
+                        configured_provider, generate_answer, llm_configured,
+                        missing_configuration_message)
 from .retrieval_bm25 import retrieve_bm25
 from .retrieval_hybrid import retrieve_hybrid
 from .reranker import RERANKER_MODEL, rerank_passages
@@ -263,8 +264,11 @@ def _safe_read(path: str | Path, validator) -> tuple[list[Any], str | None]:
 
 def _safe_error(value: str) -> str:
     import os
-    secret = os.environ.get("OPENAI_API_KEY")
-    return value.replace(secret, "[REDACTED]") if secret else value
+    for secret_name in ("OPENAI_API_KEY", "GEMINI_API_KEY"):
+        secret = os.environ.get(secret_name)
+        if secret:
+            value = value.replace(secret, "[REDACTED]")
+    return value
 
 
 def _active_data(st, label: str) -> tuple[list[PageRecord], list[ChunkRecord], list[BenchmarkQuestion], str | None]:
@@ -361,7 +365,7 @@ def _overview(st, pages, chunks, questions, label, store):
         ("Corpus indexed", "Ready" if rows else "Needs setup", f"{len(rows)} {label.lower()} document(s) indexed." if rows else "Add PDFs or select the isolated demo collection."),
         ("Development benchmark valid", dev_status, dev_reason),
         ("Test benchmark valid", test_status, test_reason),
-        ("OpenAI configured", "Ready" if openai_configured() else "Needs setup", "Model credentials detected; key value is hidden." if openai_configured() else "Set OPENAI_API_KEY and OPENAI_MODEL to enable generation and LLM evaluation."),
+        ("Model API configured", "Ready" if llm_configured() else "Needs setup", f"{configured_provider().title()} · {configured_model()} (key hidden)" if llm_configured() else missing_configuration_message()),
         ("Test configuration frozen", "Ready" if frozen else "Needs setup", frozen_reason),
     ]
     for name, status, reason in checks:
@@ -394,7 +398,7 @@ def _overview(st, pages, chunks, questions, label, store):
 def _corpus_page(st, pages, chunks, label):
     if label == "DEMO":
         st.info("This collection contains generic synthetic records labeled DEMO. Demo records are isolated from real results and conclusions.")
-    st.info("Uploaded files are processed locally and are not sent to OpenAI during ingestion.")
+    st.info("Uploaded files are processed locally and are not sent to the model provider during ingestion.")
     st.caption("PDF files only · maximum 50 MB per file")
     files = st.file_uploader("Add PDF files", type=["pdf"], accept_multiple_files=True, key="pdf_uploader")
     too_large = [file.name for file in (files or []) if file.size > 50 * 1024 * 1024]
@@ -581,7 +585,7 @@ def _ask_page(st, pages, chunks, label):
                     if not passages:
                         state["answer"] = "The indexed documents do not provide enough evidence to answer this question."
                         state["error_state"] = "no_evidence"
-                    elif not openai_configured():
+                    elif not llm_configured():
                         state["error_state"] = "missing_config"
                         state["error_message"] = missing_configuration_message()
                     else:
@@ -947,7 +951,7 @@ def render_app():
         st.markdown("**Workspace status**")
         st.caption(f"Active corpus: {docs[0]['Title'] if len(docs)==1 else f'{len(docs)} indexed documents' if docs else 'No corpus'}")
         st.caption(f"Indexed documents: {len(docs)}")
-        st.caption(f"OpenAI: {'Configured' if openai_configured() else 'Needs setup'}")
+        st.caption(f"Model API: {'Configured' if llm_configured() else 'Needs setup'}")
         st.caption(f"Displayed data: {label}")
         with st.expander("Settings"):
             chunk_sizes = sorted({chunk.chunk_size for chunk in chunks if chunk.chunk_size})

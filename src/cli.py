@@ -107,10 +107,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(results, indent=2, ensure_ascii=False))
             return 1 if any(item.get("status") in {"failed", "blocked"} for item in results) else 0
     except Exception as exc:
-        secret = os.environ.get("OPENAI_API_KEY")
         message = f"{type(exc).__name__}: {exc}"
-        if secret:
-            message = message.replace(secret, "[REDACTED]")
+        for secret_name in ("OPENAI_API_KEY", "GEMINI_API_KEY"):
+            secret = os.environ.get(secret_name)
+            if secret:
+                message = message.replace(secret, "[REDACTED]")
         print(message, file=sys.stderr)
         return 2
     return 0
